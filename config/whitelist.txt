@@ -1,0 +1,6 @@
+df -h
+free -h
+top
+whoami
+ls
+reboot

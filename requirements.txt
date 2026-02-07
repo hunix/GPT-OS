@@ -1,2 +1,15 @@
+# GPT-OS Enterprise v2.0 Dependencies
+
+# Core LLM
 openai>=1.0.0
+
+# Utilities
 pyperclip
+
+# Async support (built-in with Python 3.11+)
+# asyncio - built-in
+
+# Optional: For production deployments
+# prometheus-client>=0.19.0  # Metrics export
+# redis>=5.0.0               # Distributed cache
+# python-json-logger>=2.0.7  # Enhanced JSON logging

@@ -25,6 +25,43 @@ import random
 from openai import AsyncOpenAI
 import gc as python_gc
 
+# Local imports
+from input_validator import InputValidator, ValidationResult
+
+# ============================================================================
+# CONSTANTS
+# ============================================================================
+
+# Metrics constants
+MAX_HISTOGRAM_SIZE = 1000
+MAX_OUTPUT_LINES_DEFAULT = 1000
+
+# Cache constants
+DEFAULT_CACHE_SIZE = 1000
+DEFAULT_CACHE_TTL = 3600  # 1 hour in seconds
+
+# Circuit Breaker constants
+DEFAULT_FAILURE_THRESHOLD = 5
+DEFAULT_RECOVERY_TIMEOUT = 60  # seconds
+DEFAULT_SUCCESS_THRESHOLD = 2
+
+# Retry constants
+DEFAULT_MAX_ATTEMPTS = 3
+DEFAULT_BASE_DELAY = 1.0  # seconds
+DEFAULT_MAX_DELAY = 10.0  # seconds
+
+# Rate Limiting constants
+DEFAULT_REQUESTS_PER_MINUTE = 60
+DEFAULT_BURST_SIZE = 10
+
+# Task Queue constants
+DEFAULT_WORKERS = 4
+DEFAULT_QUEUE_SIZE = 100
+
+# Memory Management constants
+DEFAULT_MAX_HISTORY = 1000
+DEFAULT_GC_INTERVAL = 300  # 5 minutes in seconds
+
 # ============================================================================
 # CONFIGURATION MANAGEMENT
 # ============================================================================
@@ -44,40 +81,40 @@ class Config:
     
     # Circuit Breaker
     circuit_breaker_enabled: bool = True
-    circuit_breaker_failure_threshold: int = 5
-    circuit_breaker_recovery_timeout: int = 60
-    circuit_breaker_success_threshold: int = 2
+    circuit_breaker_failure_threshold: int = DEFAULT_FAILURE_THRESHOLD
+    circuit_breaker_recovery_timeout: int = DEFAULT_RECOVERY_TIMEOUT
+    circuit_breaker_success_threshold: int = DEFAULT_SUCCESS_THRESHOLD
     
     # Retry Configuration
-    retry_max_attempts: int = 3
-    retry_base_delay: float = 1.0
-    retry_max_delay: float = 10.0
+    retry_max_attempts: int = DEFAULT_MAX_ATTEMPTS
+    retry_base_delay: float = DEFAULT_BASE_DELAY
+    retry_max_delay: float = DEFAULT_MAX_DELAY
     retry_exponential_base: int = 2
     retry_jitter: bool = True
     
     # Cache Configuration
     cache_enabled: bool = True
-    cache_max_size: int = 1000
-    cache_ttl: int = 3600  # 1 hour
+    cache_max_size: int = DEFAULT_CACHE_SIZE
+    cache_ttl: int = DEFAULT_CACHE_TTL
     
     # Rate Limiting
     rate_limit_enabled: bool = True
-    rate_limit_requests_per_minute: int = 60
-    rate_limit_burst_size: int = 10
+    rate_limit_requests_per_minute: int = DEFAULT_REQUESTS_PER_MINUTE
+    rate_limit_burst_size: int = DEFAULT_BURST_SIZE
     
     # Task Queue
-    task_queue_workers: int = 4
-    task_queue_max_size: int = 100
+    task_queue_workers: int = DEFAULT_WORKERS
+    task_queue_max_size: int = DEFAULT_QUEUE_SIZE
     task_queue_timeout: int = 300
     
     # Memory Management
-    memory_max_history: int = 1000
-    memory_gc_interval: int = 300  # 5 minutes
+    memory_max_history: int = DEFAULT_MAX_HISTORY
+    memory_gc_interval: int = DEFAULT_GC_INTERVAL
     memory_cache_max_mb: int = 100
     
     # Command Execution
     command_timeout: int = 30
-    command_max_output_lines: int = 1000
+    command_max_output_lines: int = MAX_OUTPUT_LINES_DEFAULT
     
     # Logging
     log_level: str = "INFO"
@@ -113,12 +150,13 @@ class StructuredLogger:
         self.logger = logging.getLogger(name)
         self.logger.setLevel(getattr(logging, level))
         
-        # JSON formatter
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter('%(message)s'))
-        self.logger.addHandler(handler)
+        # JSON formatter - avoid duplicate handlers
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter('%(message)s'))
+            self.logger.addHandler(handler)
         
-    def _log(self, level: str, event: str, **kwargs):
+    def _log(self, level: str, event: str, **kwargs: Any) -> None:
         """Log structured message"""
         log_entry = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -138,19 +176,24 @@ class StructuredLogger:
         elif level == "CRITICAL":
             self.logger.critical(json.dumps(log_entry))
     
-    def debug(self, event: str, **kwargs):
+    def debug(self, event: str, **kwargs: Any) -> None:
+        """Log debug message"""
         self._log("DEBUG", event, **kwargs)
     
-    def info(self, event: str, **kwargs):
+    def info(self, event: str, **kwargs: Any) -> None:
+        """Log info message"""
         self._log("INFO", event, **kwargs)
     
-    def warning(self, event: str, **kwargs):
+    def warning(self, event: str, **kwargs: Any) -> None:
+        """Log warning message"""
         self._log("WARNING", event, **kwargs)
     
-    def error(self, event: str, **kwargs):
+    def error(self, event: str, **kwargs: Any) -> None:
+        """Log error message"""
         self._log("ERROR", event, **kwargs)
     
-    def critical(self, event: str, **kwargs):
+    def critical(self, event: str, **kwargs: Any) -> None:
+        """Log critical message"""
         self._log("CRITICAL", event, **kwargs)
 
 
@@ -166,23 +209,23 @@ class Metrics:
         self.gauges: Dict[str, float] = {}
         self.histograms: Dict[str, List[float]] = {}
         
-    def increment(self, name: str, value: int = 1):
-        """Increment counter"""
+    def increment(self, name: str, value: int = 1) -> None:
+        """Increment counter by value"""
         self.counters[name] = self.counters.get(name, 0) + value
     
-    def set_gauge(self, name: str, value: float):
-        """Set gauge value"""
+    def set_gauge(self, name: str, value: float) -> None:
+        """Set gauge to specific value"""
         self.gauges[name] = value
     
-    def observe(self, name: str, value: float):
-        """Record histogram observation"""
+    def observe(self, name: str, value: float) -> None:
+        """Record histogram observation for latency/duration metrics"""
         if name not in self.histograms:
             self.histograms[name] = []
         self.histograms[name].append(value)
         
-        # Keep only last 1000 observations
-        if len(self.histograms[name]) > 1000:
-            self.histograms[name] = self.histograms[name][-1000:]
+        # Keep only last MAX_HISTOGRAM_SIZE observations
+        if len(self.histograms[name]) > MAX_HISTOGRAM_SIZE:
+            self.histograms[name] = self.histograms[name][-MAX_HISTOGRAM_SIZE:]
     
     def get_stats(self) -> Dict[str, Any]:
         """Get all metrics"""
@@ -695,7 +738,7 @@ Always respond ONLY with valid JSON. No additional text."""
                 original_model = self.config.llm_model
                 self.config.llm_model = fallback_model
                 
-                result = await self._call_llm_with_retry(user_input, {"cwd": os.getcwd(), "os": "Linux"})
+                result = await self._call_llm(user_input, {"cwd": os.getcwd(), "os": "Linux"})
                 
                 # Restore original model
                 self.config.llm_model = original_model
